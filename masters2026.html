@@ -248,26 +248,52 @@ const ALL_GOLFERS=[...GROUPS.A,...GROUPS.B,...GROUPS.C,...GROUPS.D];
 let picks=[],entries=[],leaderboard=[],adminUnlocked=false;
 let overrides={},picksLocked=false,expandedCards={};
 
-function loadLocal(){
-  try{entries=JSON.parse(localStorage.getItem(LS_ENTRIES)||'[]');}catch(e){entries=[];}
-  try{overrides=JSON.parse(localStorage.getItem(LS_OVERRIDES)||'{}');}catch(e){overrides={};}
-  try{picksLocked=JSON.parse(localStorage.getItem(LS_LOCKED)||'false');}catch(e){picksLocked=false;}
+async function kvGet(key){
+  try{
+    const res=await fetch(WORKER_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'kv-get',key})});
+    const data=await res.json();
+    return data.value?JSON.parse(data.value):null;
+  }catch(e){return null;}
 }
-function saveLocal(){
-  localStorage.setItem(LS_ENTRIES,JSON.stringify(entries));
-  localStorage.setItem(LS_OVERRIDES,JSON.stringify(overrides));
-  localStorage.setItem(LS_LOCKED,JSON.stringify(picksLocked));
+async function kvSet(key,value){
+  try{
+    await fetch(WORKER_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'kv-set',key,value:JSON.stringify(value)})});
+  }catch(e){}
+  // Also save locally as cache
+  try{localStorage.setItem(key,JSON.stringify(value));}catch(e){}
+}
+function localGet(key,fallback){
+  try{const v=localStorage.getItem(key);return v?JSON.parse(v):fallback;}catch(e){return fallback;}
 }
 
-function saveEntry(entry){
+async function loadAllData(){
+  // Load from KV (shared), fall back to localStorage
+  const remoteEntries=await kvGet('entries');
+  entries=remoteEntries||localGet(LS_ENTRIES,[]);
+  try{localStorage.setItem(LS_ENTRIES,JSON.stringify(entries));}catch(e){}
+
+  const remoteLocked=await kvGet('locked');
+  picksLocked=remoteLocked!==null?remoteLocked:localGet(LS_LOCKED,false);
+
+  overrides=localGet(LS_OVERRIDES,{});
+
+  renderStandings();
+  updateEnterTab();
+  if(adminUnlocked)renderAdmin();
+}
+
+async function saveEntry(entry){
   const idx=entries.findIndex(e=>e.name.toLowerCase()===entry.name.toLowerCase());
   if(idx>=0)entries[idx]=entry;else entries.push(entry);
-  saveLocal();renderStandings();
+  await kvSet('entries',entries);
+  renderStandings();
 }
-function deleteEntry(name){
+
+async function deleteEntry(name){
   if(!confirm('Delete '+name+'?'))return;
   entries=entries.filter(e=>e.name.toLowerCase()!==name.toLowerCase());
-  saveLocal();renderStandings();renderAdmin();
+  await kvSet('entries',entries);
+  renderStandings();renderAdmin();
 }
 
 async function fetchLeaderboard(){
@@ -483,9 +509,10 @@ function checkPin(){
   }else{document.getElementById('pinErr').textContent='Incorrect PIN';}
 }
 
-function toggleLock(){
+async function toggleLock(){
   picksLocked=!picksLocked;
-  saveLocal();updateLockUI();updateEnterTab();
+  await kvSet('locked',picksLocked);
+  updateLockUI();updateEnterTab();
 }
 
 function updateLockUI(){
@@ -553,12 +580,15 @@ function applyOverrides(){
     const input=document.getElementById(id);
     if(input)overrides[n]=input.value;
   });
-  saveLocal();renderStandings();
+  try{localStorage.setItem(LS_OVERRIDES,JSON.stringify(overrides));}catch(e){}
+  renderStandings();
   alert('Overrides applied!');
 }
 
 function clearOverrides(){
-  overrides={};saveLocal();renderAdmin();renderStandings();
+  overrides={};
+  try{localStorage.setItem(LS_OVERRIDES,JSON.stringify(overrides));}catch(e){}
+  renderAdmin();renderStandings();
   alert('Overrides cleared.');
 }
 
@@ -572,13 +602,11 @@ function showTab(t){
   if(t==='admin'&&adminUnlocked)renderAdmin();
 }
 
-loadLocal();
 initGrids();
 updatePickUI();
-updateEnterTab();
 loadCachedLB();
-renderStandings();
 renderLeaderboard();
+loadAllData();
 </script>
 </body>
 </html>
