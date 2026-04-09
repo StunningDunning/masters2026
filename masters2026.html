@@ -294,6 +294,9 @@ async function loadAllData(){
 }
 
 async function saveEntry(entry){
+  // Always fetch latest from KV first to avoid overwriting others
+  const latest=await kvGet('entries');
+  if(latest) entries=latest;
   const idx=entries.findIndex(e=>e.name.toLowerCase()===entry.name.toLowerCase());
   if(idx>=0)entries[idx]=entry;else entries.push(entry);
   await kvSet('entries',entries);
