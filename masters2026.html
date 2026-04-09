@@ -226,7 +226,7 @@ input:focus{border-color:var(--green)}
     <div class="admin-section">
       <div class="admin-section-title">Manual score overrides (testing)</div>
       <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Set any golfer's score to par manually. Negative = under par (e.g. -5). Leave blank to use live data. Hit Apply when done.</p>
-      <div id="overrideGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px"></div>
+      <div id="overrideGrid" style="display:grid;grid-template-columns:1fr;gap:0"></div>
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="admin-btn" onclick="applyOverrides()">Apply overrides</button>
         <button class="admin-btn danger" onclick="clearOverrides()">Clear all overrides</button>
@@ -247,8 +247,8 @@ const LS_LOCKED='masters2026-locked';
 const GROUPS={
   A:['Scottie Scheffler','Rory McIlroy','Cameron Young','Tommy Fleetwood','J.J. Spaun'],
   B:['Matt Fitzpatrick','Chris Gotterup','Colin Morikawa','Russell Henley','Robert MacIntyre','Sepp Straka','Justin Rose','Hideki Matsuyama','Xander Schauffele','Justin Thomas'],
-  C:['Ben Griffin','Akshay Bhatia','Keegan Bradley','Ludvig Aberg','Viktor Hovland','Maverick McNealy','Jacob Bridgeman','Patrick Reed','Si Woo Kim','Alexander Noren','Bryson DeChambeau','Ryan Gerard','Harris English','Min Woo Lee','Jon Rahm'],
-  D:['Daniel Berger','Harry Hall','Michael Kim','Mateo Pulcini','Gary Woodland','Michael Brennan','Brian Harman','Kurt Kitayama','Aaron Rai','Sam Burns','Tyrrell Hatton','Jake Knapp','Kristoffer Reitan','Angel Cabrera','Jackson Herrington','Brooks Koepka','Davis Riley','Brian Campbell','Nicolai Hojgaard','Fife Laopakdee','Charl Schwartzel','Patrick Cantlay','Rasmus Hojgaard','Hao-Tong Li','Adam Scott','Wyndham Clark','Brandon Holtz','Shane Lowry','Vijay Singh','Corey Conners','Max Homa','Jose Maria Olazabal','Cameron Smith','Fred Couples','Mason Howell','Matthew McCarty','Jordan Spieth','Jason Day','Sungjae Im','Tom McKibbin','Sam Stevens','Nicolas Echavarria','Casey Jarvis','Rasmus Neergaard-Petersen','Nick Taylor','Ethan Fang','Dustin Johnson','Andrew Novak','Sami Valimaki','Ryan Fox','Zach Johnson','Carlos Ortiz','Bubba Watson','Sergio Garcia','Naoyuki Kataoka','Marco Penge','Mike Weir','Max Greysterman','John Keefer','Aldrich Potgieter','Danny Willett']
+  C:['Ben Griffin','Akshay Bhatia','Keegan Bradley','Ludvig Aberg','Viktor Hovland','Maverick McNealy','Jacob Bridgeman','Patrick Reed','Si Woo Kim','Alex Noren','Bryson DeChambeau','Ryan Gerard','Harris English','Min Woo Lee','Jon Rahm'],
+  D:['Daniel Berger','Harry Hall','Michael Kim','Mateo Pulcini','Gary Woodland','Michael Brennan','Brian Harman','Kurt Kitayama','Aaron Rai','Sam Burns','Tyrrell Hatton','Jake Knapp','Kristoffer Reitan','Angel Cabrera','Jackson Herrington','Brooks Koepka','Davis Riley','Brian Campbell','Nicolai Højgaard','Fife Laopakdee','Charl Schwartzel','Patrick Cantlay','Rasmus Højgaard','Haotong Li','Adam Scott','Wyndham Clark','Brandon Holtz','Shane Lowry','Vijay Singh','Corey Conners','Max Homa','Jose Maria Olazabal','Cameron Smith','Fred Couples','Mason Howell','Matthew McCarty','Jordan Spieth','Jason Day','Sungjae Im','Tom McKibbin','Sam Stevens','Nico Echavarria','Casey Jarvis','Rasmus Neergaard-Petersen','Nick Taylor','Ethan Fang','Dustin Johnson','Andrew Novak','Sami Valimaki','Ryan Fox','Zach Johnson','Carlos Ortiz','Bubba Watson','Sergio Garcia','Naoyuki Kataoka','Marco Penge','Mike Weir','Max Greysterman','John Keefer','Aldrich Potgieter','Danny Willett']
 };
 const LIMITS={A:1,B:1,C:2,D:99};
 const ALL_GOLFERS=[...GROUPS.A,...GROUPS.B,...GROUPS.C,...GROUPS.D];
@@ -315,17 +315,11 @@ async function fetchLeaderboard(){
   btn.disabled=true;btn.textContent='⟳ Fetching...';
   try{
     const res=await fetch(WORKER_URL,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:'claude-sonnet-4-20250514',max_tokens:2000,
-        tools:[{type:'web_search_20250305',name:'web_search'}],
-        messages:[{role:'user',content:'Search for the current 2026 Masters Tournament leaderboard at Augusta National. Return ONLY a valid JSON array, no other text. Each object: name (string full name), score (integer strokes to par negative=under), position (string "1" "T2" "CUT" "WD" "DQ"), thru (string "F" or hole number or "-"). Include all players. Example: [{"name":"Scottie Scheffler","score":-8,"position":"1","thru":"F"}]'}]
-      })
+      body:JSON.stringify({action:'leaderboard'})
     });
     const data=await res.json();
-    const txt=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
-    const match=txt.match(/\[[\s\S]*\]/);
-    if(match){
-      leaderboard=JSON.parse(match[0]);
+    if(data.players&&data.players.length){
+      leaderboard=data.players;
       const now=new Date();
       document.getElementById('refreshTime').textContent='Updated '+now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
       localStorage.setItem(LS_LB,JSON.stringify({ts:Date.now(),data:leaderboard}));
@@ -342,17 +336,33 @@ function loadCachedLB(){
   }catch(e){}
 }
 
+// Name normalization for matching
+function normName(n){
+  return n.toLowerCase()
+    .replace(/ø/g,'o').replace(/å/g,'a').replace(/é/g,'e').replace(/ó/g,'o')
+    .replace(/ñ/g,'n').replace(/ü/g,'u').replace(/ä/g,'a').replace(/ö/g,'o')
+    .replace(/[-]/g,' ').replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim();
+}
+
 function findPlayer(name){
   const oKey=Object.keys(overrides).find(k=>k.toLowerCase()===name.toLowerCase());
   if(oKey!==undefined&&overrides[oKey]!==''){const sc=parseInt(overrides[oKey]);if(!isNaN(sc))return{name,score:sc,position:'OVR',thru:'OVR',_override:true};}
   if(!leaderboard.length)return null;
-  const parts=name.toLowerCase().split(' ');
+  const nn=normName(name);
+  const parts=nn.split(' ');
   const last=parts[parts.length-1];
   const first3=parts[0].slice(0,3);
-  return leaderboard.find(p=>{const pn=p.name.toLowerCase();return pn.includes(last)&&pn.includes(first3);})||leaderboard.find(p=>p.name.toLowerCase().includes(last))||null;
+  // Exact normalized match first
+  const exact=leaderboard.find(p=>normName(p.name)===nn);
+  if(exact)return exact;
+  // Last name + first 3 chars
+  const partial=leaderboard.find(p=>{const pn=normName(p.name);return pn.includes(last)&&pn.includes(first3);});
+  if(partial)return partial;
+  // Last name only
+  return leaderboard.find(p=>normName(p.name).includes(last))||null;
 }
 
-function isCut(p){return p&&['CUT','WD','DQ','MC'].includes((p.position||'').toUpperCase());}
+function isCut(p){return p&&(['CUT','WD','DQ','MC'].includes((p.position||'').toUpperCase())||p.status==='STATUS_ELIMINATED');}
 
 function scoreHtml(p){
   if(!p)return '<span class="even">—</span>';
@@ -601,10 +611,10 @@ function renderAdmin(){
     const g=Object.keys(GROUPS).find(g=>GROUPS[g].includes(n));
     const val=overrides[n]||'';
     const id='ovr-'+n.replace(/\s/g,'_').replace(/[^a-zA-Z_]/g,'');
-    return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0">
-      <span class="grp-badge grp-${g}">${g}</span>
-      <span style="font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${n}</span>
-      <input class="score-input" id="${id}" type="number" value="${val}" placeholder="—"/>
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--cream2)">
+      <span class="grp-badge grp-${g}" style="flex-shrink:0">${g}</span>
+      <span style="font-size:13px;flex:1;min-width:0">${n}</span>
+      <input class="score-input" id="${id}" type="number" value="${val}" placeholder="—" style="flex-shrink:0;width:60px"/>
     </div>`;
   }).join('');
   updateLockUI();
