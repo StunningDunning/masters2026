@@ -203,6 +203,14 @@ input:focus{border-color:var(--green)}
   <div id="adminPanel" class="hidden">
 
     <div class="admin-section">
+      <div class="admin-section-title">Pick visibility</div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <button class="admin-btn" id="hideBtn" onclick="toggleHide()">&#128064; Hide all picks</button>
+        <span id="hideStatus" style="font-size:13px;color:var(--muted)">Picks visible to everyone</span>
+      </div>
+    </div>
+
+    <div class="admin-section">
       <div class="admin-section-title">Pick submissions</div>
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <button class="admin-btn" id="lockBtn" onclick="toggleLock()">&#128274; Lock picks</button>
@@ -246,7 +254,7 @@ const LIMITS={A:1,B:1,C:2,D:99};
 const ALL_GOLFERS=[...GROUPS.A,...GROUPS.B,...GROUPS.C,...GROUPS.D];
 
 let picks=[],entries=[],leaderboard=[],adminUnlocked=false;
-let overrides={},picksLocked=false,expandedCards={};
+let overrides={},picksLocked=false,picksHidden=false,expandedCards={};
 
 async function kvGet(key){
   try{
@@ -274,6 +282,9 @@ async function loadAllData(){
 
   const remoteLocked=await kvGet('locked');
   picksLocked=remoteLocked!==null?remoteLocked:localGet(LS_LOCKED,false);
+
+  const remoteHidden=await kvGet('hidden');
+  picksHidden=remoteHidden!==null?remoteHidden:false;
 
   overrides=localGet(LS_OVERRIDES,{});
 
@@ -407,23 +418,24 @@ function renderStandings(){
       const b4tag=isB4?'<span style="color:var(--green);font-size:11px;margin-left:4px">&#10003;</span>':'';
       return `<tr><td><span class="grp-badge grp-${ps.group}">${ps.group}</span>${ps.name}${ovrTag}${b4tag}</td><td>${scoreHtml(ps.lb)}</td><td class="thru">${ps.lb&&!ps.lb._override?ps.lb.thru||'':''}</td></tr>`;
     }).join('');
+    const hiddenBody=`<div style="padding:12px 0;font-size:13px;color:var(--muted);font-family:'DM Mono',monospace;text-align:center">&#128274; Picks hidden until tournament starts</div>`;
     return `<div class="entry-card ${rc} fade-in">
-      <div class="entry-header" onclick="toggleCard('${e.name.replace(/'/g,"\\'")}')">
+      <div class="entry-header" onclick="${picksHidden?'':'toggleCard(\''+e.name.replace(/'/g,"\\'")+'\')'}">
         <div class="entry-left">
           <div class="rank-num">${rank}</div>
-          <div><div class="entry-name">${e.name}</div><div class="entry-tb">TB: ${e.tiebreaker!==''?e.tiebreaker:'—'}</div></div>
+          <div><div class="entry-name">${e.name}</div><div class="entry-tb">TB: ${picksHidden?'—':e.tiebreaker!==''?e.tiebreaker:'—'}</div></div>
         </div>
         <div class="entry-right">
-          <div class="entry-total ${totCls}">${totTxt}</div>
-          <span class="chevron ${isOpen?'open':''}">&#9660;</span>
+          <div class="entry-total ${totCls}">${picksHidden?'—':totTxt}</div>
+          ${picksHidden?'':'<span class="chevron '+(isOpen?'open':'')+'">&#9660;</span>'}
         </div>
       </div>
-      <div class="entry-body" ${isOpen?'':'style="display:none"'}>
+      ${picksHidden?hiddenBody:`<div class="entry-body" ${isOpen?'':'style="display:none"'}>
         <table class="entry-picks-table">
           <thead><tr><th>Golfer</th><th>Score</th><th>Thru</th></tr></thead>
           <tbody>${pickRows}</tbody>
         </table>
-      </div>
+      </div>`}
     </div>`;
   }).join('');
   const note=lbLoaded?'':'<div class="status status-warn" style="margin-bottom:1rem">Scores not loaded — press Refresh to see live scoring</div>';
@@ -481,7 +493,8 @@ function updatePickUI(){
   else{sb.className='status status-warn';sb.textContent=`${picks.length}/7 selected — max 1 from A · max 1 from B · max 2 from C`;}
 }
 
-function submitEntry(){
+
+async function submitEntry(){
   if(picksLocked){alert('Pick submissions are locked.');return;}
   const name=document.getElementById('entrantName').value.trim();
   const tb=document.getElementById('tiebreaker').value.trim();
@@ -508,6 +521,26 @@ function checkPin(){
     renderAdmin();
   }else{document.getElementById('pinErr').textContent='Incorrect PIN';}
 }
+
+async function toggleHide(){
+  picksHidden=!picksHidden;
+  await kvSet('hidden',picksHidden);
+  updateHideUI();renderStandings();
+}
+
+function updateHideUI(){
+  const btn=document.getElementById('hideBtn');
+  const status=document.getElementById('hideStatus');
+  if(!btn)return;
+  if(picksHidden){
+    btn.textContent='👁 Show all picks';btn.className='admin-btn active';
+    status.textContent='Picks HIDDEN from everyone';status.style.color='var(--red)';
+  }else{
+    btn.textContent='🙈 Hide all picks';btn.className='admin-btn';
+    status.textContent='Picks visible to everyone';status.style.color='var(--muted)';
+  }
+}
+
 
 async function toggleLock(){
   picksLocked=!picksLocked;
@@ -572,6 +605,7 @@ function renderAdmin(){
     </div>`;
   }).join('');
   updateLockUI();
+  updateHideUI();
 }
 
 function applyOverrides(){
